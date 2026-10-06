@@ -91,7 +91,6 @@ public class AsientoControllerTest {
 
     public void testReservaAsientosEndpoint() throws Exception{
         ReservaRequestDto request = new ReservaRequestDto();
-        request.setUsuarioId("user123");
         request.setFuncionId(1L);
         request.setAsientosSolicitados(List.of(1L, 2L));
 
