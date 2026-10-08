@@ -15,7 +15,7 @@ public class Sala {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-        private Long id;
+    private Long id;
     
     @Column(name= "sala_codigo", nullable = false)
     private String sala_codigo;
@@ -23,9 +23,16 @@ public class Sala {
     @Column(name= "nombre", nullable = false)
     private String nombre;
 
-    @Column(name="cantidad_filas", nullable = false)
+    @Column(name= "cantidad_filas")
     private Integer cantidad_filas;
 
-    @Column(name="asientos_por_fila", nullable = false)
+    @Column(name= "asientos_por_fila")
     private Integer asientos_por_fila;
+
+    // NUEVOS CAMPOS para soportar múltiples verticales (Cine/Teatro vs Conciertos/Deportes)
+    @Column(name= "tipo_recinto", nullable = false)
+    private String tipoRecinto = "NUMERADO"; // Ej: "NUMERADO" (cine/teatro) o "GENERAL" (conciertos/estadios)[cite: 28]
+
+    @Column(name= "aforo_maximo")
+    private Integer aforoMaximo;
 }

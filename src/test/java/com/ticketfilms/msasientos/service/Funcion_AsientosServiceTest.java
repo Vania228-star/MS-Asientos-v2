@@ -3,7 +3,7 @@ package com.ticketfilms.msasientos.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,9 +57,10 @@ public class Funcion_AsientosServiceTest {
         funcionAsiento.setAsiento_id(asientoId);
         funcionAsiento.setEstado("DISPONIBLE");
 
-        when(funcion_AsientoRepository.findByFuncion_idAndAsiento_id(funcionId, asientoId))
+        when(funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcionId, asientoId))
             .thenReturn(Optional.of(funcionAsiento));
-        when(funcion_AsientoRepository.save(any(Funcion_Asiento.class))).thenReturn(funcionAsiento);
+        
+        when(funcion_AsientoRepository.saveAll(anyList())).thenReturn(List.of(funcionAsiento));
 
         boolean resultado = funcion_AsientoService.reservarAsientos(usuarioId, funcionId, List.of(asientoId));
 

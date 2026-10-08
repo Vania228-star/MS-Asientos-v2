@@ -12,15 +12,12 @@ import com.ticketfilms.msasientos.repository.AsientoRepository;
 import com.ticketfilms.msasientos.repository.Funcion_AsientoRepository;
 import com.ticketfilms.msasientos.repository.SalaRepository;
 import feign.FeignException;
-import jakarta.persistence.LockModeType;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.jpa.repository.Lock;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,7 +42,6 @@ public class Funcion_AsientoService {
                 && fa.getReservado_hasta().isBefore(LocalDateTime.now());
         
         if (expirado) {
-            // Si detectamos que expiró, enviamos el evento de Kafka opcionalmente
             asientoKafkaProducer.enviarReservaExpirada(fa.getFuncion_id(), List.of(fa.getAsiento_id()), fa.getUsuario_id());
         }
         return expirado;
@@ -104,6 +100,12 @@ public class Funcion_AsientoService {
         }
 
         Sala sala = resolverSala(funcion.getSala());
+        
+        // Validación adaptativa: si el recinto es de admisión general, no genera matriz estricta de asientos individuales[cite: 28]
+        if ("GENERAL".equalsIgnoreCase(sala.getTipoRecinto())) {
+            return List.of(); 
+        }
+
         List<Asiento> asientos = asientoRepository.findBySalaId(sala.getId());
 
         List<Funcion_Asiento> nuevos = asientos.stream()
@@ -199,7 +201,6 @@ public class Funcion_AsientoService {
 
     @Transactional
     public String confirmarAsientos(String usuario_id, Long funcion_id, List<Long> asientosIds){
-        // Método mantenido por compatibilidad REST si se requiere
         List<Funcion_Asiento> aConfirmar = new ArrayList<>();
 
         for (Long asiento_id : ordenarSinRepetidos(asientosIds)) {
@@ -276,7 +277,6 @@ public class Funcion_AsientoService {
         }
         funcion_AsientoRepository.saveAll(aLiberar);
 
-        // Notificar por Kafka que la reserva fue liberada/expirada
         asientoKafkaProducer.enviarReservaExpirada(funcion_id, asientosIds, usuario_id);
 
         return "OK";
