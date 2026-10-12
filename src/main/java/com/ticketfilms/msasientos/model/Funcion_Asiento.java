@@ -28,10 +28,10 @@ public class Funcion_Asiento {
     @Column(name= "estado", nullable = false)
     private String estado;
 
-    @Column(name= "usuario_id", nullable = false)
+    @Column(name= "usuario_id")
     private String usuario_id;
 
-    @Column(name= "reservado_hasta", nullable = false)
+    @Column(name= "reservado_hasta")
     private LocalDateTime reservado_hasta;
 
     @Column(name= "actualizado_en", nullable = false)
