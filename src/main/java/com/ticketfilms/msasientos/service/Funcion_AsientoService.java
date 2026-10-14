@@ -40,7 +40,7 @@ public class Funcion_AsientoService {
         boolean expirado = ESTADO_RESERVADO.equals(fa.getEstado())
                 && fa.getReservado_hasta() != null
                 && fa.getReservado_hasta().isBefore(LocalDateTime.now());
-        
+
         if (expirado) {
             asientoKafkaProducer.enviarReservaExpirada(fa.getFuncion_id(), List.of(fa.getAsiento_id()), fa.getUsuario_id());
         }
@@ -55,7 +55,7 @@ public class Funcion_AsientoService {
         return ids.stream().distinct().sorted().toList();
     }
 
-    public List<Funcion_Asiento> obtenerMapaFuncion_Asientos(Long funcion_id){
+    public List<Funcion_Asiento> obtenerMapaFuncion_Asientos(Long funcion_id) {
         List<Funcion_Asiento> asientos = funcion_AsientoRepository.findByFuncion_id(funcion_id);
 
         if (asientos.isEmpty()) {
@@ -86,7 +86,7 @@ public class Funcion_AsientoService {
         }
         return salaRepository.findByNombre(salaValor)
                 .orElseThrow(() -> new IllegalStateException(
-                "No se encontró Sala para el valor '" + salaValor + "' (ni por código ni por nombre)"));
+                        "No se encontró Sala para el valor '" + salaValor + "' (ni por código ni por nombre)"));
     }
 
     private List<Funcion_Asiento> generarMapaInicial(Long funcion_id) {
@@ -100,10 +100,10 @@ public class Funcion_AsientoService {
         }
 
         Sala sala = resolverSala(funcion.getSala());
-        
+
         // Validación adaptativa: si el recinto es de admisión general, no genera matriz estricta de asientos individuales[cite: 28]
         if ("GENERAL".equalsIgnoreCase(sala.getTipoRecinto())) {
-            return List.of(); 
+            return List.of();
         }
 
         List<Asiento> asientos = asientoRepository.findBySalaId(sala.getId());
@@ -123,7 +123,7 @@ public class Funcion_AsientoService {
     }
 
     @Transactional
-    public boolean reservarAsientos(String usuario_id, Long funcion_id, List<Long> asientosIds){
+    public boolean reservarAsientos(String usuario_id, Long funcion_id, List<Long> asientosIds) {
         if (asientosIds == null || asientosIds.isEmpty()) {
             return false;
         }
@@ -136,8 +136,8 @@ public class Funcion_AsientoService {
         List<Funcion_Asiento> aReservar = new ArrayList<>();
 
         for (Long asiento_id : ordenarSinRepetidos(asientosIds)) {
-            Optional<Funcion_Asiento> optFuncionAsiento =
-                    funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcion_id, asiento_id);
+            Optional<Funcion_Asiento> optFuncionAsiento
+                    = funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcion_id, asiento_id);
 
             if (optFuncionAsiento.isEmpty()) {
                 return false;
@@ -167,45 +167,77 @@ public class Funcion_AsientoService {
 
     @Transactional
     public void marcarAsientosComoOcupados(Long funcionId, List<Long> asientosIds) {
-        if (asientosIds == null || asientosIds.isEmpty()) return;
-        
+        if (asientosIds == null || asientosIds.isEmpty()) {
+            return;
+        }
+
         List<Funcion_Asiento> asientos = new ArrayList<>();
         for (Long asientoId : asientosIds) {
             funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcionId, asientoId)
-                .ifPresent(fa -> {
-                    fa.setEstado(ESTADO_OCUPADO);
-                    fa.setActualizado_en(LocalDateTime.now());
-                    asientos.add(fa);
-                });
+                    .ifPresent(fa -> {
+                        fa.setEstado(ESTADO_OCUPADO);
+                        fa.setActualizado_en(LocalDateTime.now());
+                        asientos.add(fa);
+                    });
         }
         funcion_AsientoRepository.saveAll(asientos);
     }
 
     @Transactional
-    public void liberarAsientosPorFalla(Long funcionId, List<Long> asientosIds) {
-        if (asientosIds == null || asientosIds.isEmpty()) return;
-
-        List<Funcion_Asiento> asientos = new ArrayList<>();
-        for (Long asientoId : asientosIds) {
-            funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcionId, asientoId)
-                .ifPresent(fa -> {
-                    fa.setEstado(ESTADO_DISPONIBLE);
-                    fa.setUsuario_id(null);
-                    fa.setReservado_hasta(null);
-                    fa.setActualizado_en(LocalDateTime.now());
-                    asientos.add(fa);
-                });
+    public void liberarAsientosPorFalla(Long funcionId, List<Long> asientosIds, String usuarioId) {
+        if (asientosIds == null || asientosIds.isEmpty()) {
+            return;
         }
-        funcion_AsientoRepository.saveAll(asientos);
+        if (usuarioId == null || usuarioId.isBlank()) {
+            return;
+        }
+
+        List<Funcion_Asiento> aLiberar = new ArrayList<>();
+
+        for (Long asientoId : asientosIds) {
+            Optional<Funcion_Asiento> optFuncionAsiento
+                    = funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcionId, asientoId);
+
+            if (optFuncionAsiento.isEmpty()) {
+                // El asiento no existe para esa función: lo ignoramos (no es un error fatal).
+                continue;
+            }
+
+            Funcion_Asiento fa = optFuncionAsiento.get();
+
+            // Idempotencia: si ya está DISPONIBLE, no hacemos nada (mensaje duplicado).
+            if (ESTADO_DISPONIBLE.equals(fa.getEstado())) {
+                continue;
+            }
+
+            // Solo liberamos si está RESERVADO por el mismo usuario del evento.
+            if (ESTADO_RESERVADO.equals(fa.getEstado())
+                    && usuarioId.equals(fa.getUsuario_id())) {
+                aLiberar.add(fa);
+            }
+            // Si está OCUPADO o RESERVADO por otro usuario, no tocamos nada.
+        }
+
+        if (aLiberar.isEmpty()) {
+            return;
+        }
+
+        for (Funcion_Asiento fa : aLiberar) {
+            fa.setEstado(ESTADO_DISPONIBLE);
+            fa.setUsuario_id(null);
+            fa.setReservado_hasta(null);
+            fa.setActualizado_en(LocalDateTime.now());
+        }
+        funcion_AsientoRepository.saveAll(aLiberar);
     }
 
     @Transactional
-    public String confirmarAsientos(String usuario_id, Long funcion_id, List<Long> asientosIds){
+    public String confirmarAsientos(String usuario_id, Long funcion_id, List<Long> asientosIds) {
         List<Funcion_Asiento> aConfirmar = new ArrayList<>();
 
         for (Long asiento_id : ordenarSinRepetidos(asientosIds)) {
-            Optional<Funcion_Asiento> optFuncionAsiento =
-                    funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcion_id, asiento_id);
+            Optional<Funcion_Asiento> optFuncionAsiento
+                    = funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcion_id, asiento_id);
 
             if (optFuncionAsiento.isEmpty()) {
                 return "ASIENTO_INEXISTENTE";
@@ -241,7 +273,7 @@ public class Funcion_AsientoService {
     }
 
     @Transactional
-    public String liberarAsientos(String usuario_id, Long funcion_id, List<Long> asientosIds){
+    public String liberarAsientos(String usuario_id, Long funcion_id, List<Long> asientosIds) {
         if (asientosIds == null || asientosIds.isEmpty()) {
             return "SOLICITUD_INVALIDA";
         }
@@ -249,8 +281,8 @@ public class Funcion_AsientoService {
         List<Funcion_Asiento> aLiberar = new ArrayList<>();
 
         for (Long asiento_id : ordenarSinRepetidos(asientosIds)) {
-            Optional<Funcion_Asiento> optFuncionAsiento =
-                    funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcion_id, asiento_id);
+            Optional<Funcion_Asiento> optFuncionAsiento
+                    = funcion_AsientoRepository.findByFuncion_idAndAsiento_idForUpdate(funcion_id, asiento_id);
 
             if (optFuncionAsiento.isEmpty()) {
                 return "ASIENTO_INEXISTENTE";
