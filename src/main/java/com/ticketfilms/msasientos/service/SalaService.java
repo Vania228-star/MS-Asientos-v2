@@ -8,13 +8,14 @@ import org.springframework.stereotype.Service;
 import com.ticketfilms.msasientos.model.Sala;
 import com.ticketfilms.msasientos.repository.SalaRepository;
 
-import lombok.RequiredArgsConstructor;
-
 @Service
-@RequiredArgsConstructor
 public class SalaService {
     
     private final SalaRepository salaRepository;
+
+    public SalaService(SalaRepository salaRepository) {
+        this.salaRepository = salaRepository;
+    }
 
     public List<Sala> listarSalas(){
         return salaRepository.findAll();

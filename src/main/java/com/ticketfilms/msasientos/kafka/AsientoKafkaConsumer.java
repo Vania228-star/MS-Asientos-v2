@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ticketfilms.msasientos.dto.AsientoEventoDto;
 import com.ticketfilms.msasientos.service.Funcion_AsientoService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
@@ -20,11 +19,15 @@ import org.springframework.stereotype.Component;
 // excepción sube y KafkaErrorHandlingConfig decide: reintentar o mandar al DLT.
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AsientoKafkaConsumer {
 
     private final Funcion_AsientoService funcion_AsientoService;
     private final ObjectMapper objectMapper;
+
+    public AsientoKafkaConsumer(Funcion_AsientoService funcion_AsientoService, ObjectMapper objectMapper) {
+        this.funcion_AsientoService = funcion_AsientoService;
+        this.objectMapper = objectMapper;
+    }
 
     @KafkaListener(topics = KafkaTopics.COMPRA_FALLIDA, groupId = "ms-asientos-group")
     public void consumirCompraFallida(String mensaje) {

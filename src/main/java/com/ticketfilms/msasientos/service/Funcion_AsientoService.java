@@ -17,12 +17,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@RequiredArgsConstructor
 public class Funcion_AsientoService {
 
     private static final String ESTADO_DISPONIBLE = "DISPONIBLE";
@@ -35,6 +33,18 @@ public class Funcion_AsientoService {
     private final SalaRepository salaRepository;
     private final FuncionClient funcionClient;
     private final AsientoKafkaProducer asientoKafkaProducer;
+
+    public Funcion_AsientoService(Funcion_AsientoRepository funcion_AsientoRepository,
+            AsientoRepository asientoRepository,
+            SalaRepository salaRepository,
+            FuncionClient funcionClient,
+            AsientoKafkaProducer asientoKafkaProducer) {
+        this.funcion_AsientoRepository = funcion_AsientoRepository;
+        this.asientoRepository = asientoRepository;
+        this.salaRepository = salaRepository;
+        this.funcionClient = funcionClient;
+        this.asientoKafkaProducer = asientoKafkaProducer;
+    }
 
     private boolean estaExpirado(Funcion_Asiento fa) {
         boolean expirado = ESTADO_RESERVADO.equals(fa.getEstado())

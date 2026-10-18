@@ -22,16 +22,21 @@ import com.ticketfilms.msasientos.service.AsientoService;
 import com.ticketfilms.msasientos.service.Funcion_AsientoService;
 import com.ticketfilms.msasientos.service.SalaService;
 
-import lombok.RequiredArgsConstructor;
-
 @RestController
 @RequestMapping("/api/asientos")
-@RequiredArgsConstructor
 public class AsientoController {
 
     private final AsientoService asientoService;
     private final SalaService salaService;
     private final Funcion_AsientoService funcion_AsientoService;
+
+    public AsientoController(AsientoService asientoService,
+            SalaService salaService,
+            Funcion_AsientoService funcion_AsientoService) {
+        this.asientoService = asientoService;
+        this.salaService = salaService;
+        this.funcion_AsientoService = funcion_AsientoService;
+    }
 
     @GetMapping("/sala")
     public ResponseEntity<List<Sala>> listarSalas(){
