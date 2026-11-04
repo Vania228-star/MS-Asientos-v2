@@ -59,9 +59,13 @@ public class AsientoController {
             @RequestBody ReservaRequestDto request,
             @AuthenticationPrincipal Jwt jwt){
         String usuarioId = jwt.getSubject();
+        // Se guarda con la reserva para poder avisarle si vence.
+        // El access token de Cognito puede no traer "email": en ese caso queda null.
+        String email = jwt.getClaimAsString("email");
 
         boolean exito = funcion_AsientoService.reservarAsientos(
             usuarioId,
+            email,
             request.getFuncionId(),
             request.getAsientosSolicitados()
         );

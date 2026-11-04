@@ -31,6 +31,10 @@ public class Funcion_Asiento {
     @Column(name= "usuario_id")
     private String usuario_id;
 
+    // Email del dueño de la reserva, para avisarle si la reserva vence
+    @Column(name= "email_usuario")
+    private String email_usuario;
+
     @Column(name= "reservado_hasta")
     private LocalDateTime reservado_hasta;
 
