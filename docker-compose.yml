@@ -1,22 +1,22 @@
-# Requiere Kafka corriendo (lo levanta el compose de ms-boletos)
-# y la red compartida: docker network create ticketfilms-net
+# Requiere el clúster RabbitMQ corriendo (lo levanta el compose de ms-boletos)
+# y la red compartida:  docker network create ticketfilms-net
 services:
   ms-asientos:
+    profiles: ["app"]
     build: .
-    container_name: ms-asientos
-    restart: on-failure
+    container_name: ms-asientos-container
     ports:
       - "8082:8082"
     environment:
-      JAVA_TOOL_OPTIONS: "-Xmx384m"
       DB_URL: ${DB_URL}
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
       COGNITO_ISSUER_URI: ${COGNITO_ISSUER_URI}
-      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
-      MS_CARTELERA_URL: ${MS_CARTELERA_URL:-http://host.docker.internal:8081}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      RABBITMQ_HOST: rabbit1
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      MS_CARTELERA_URL: http://host.docker.internal:8081
+    restart: on-failure
 
 networks:
   default:

@@ -1,7 +1,7 @@
-package com.ticketfilms.msasientos.kafka;
+package com.ticketfilms.msasientos.messaging;
 
-// error DEFINITIVO: el mensaje esta mal formado o incompleto.
-// Reintentar no sitve de nada, asi que va directo al topico de fallidos DLT.
+// Error DEFINITIVO: el mensaje está mal formado o incompleto.
+// Reintentar no sirve de nada, así que va directo a la DLQ.
 public class MensajeInvalidoException extends RuntimeException {
 
     public MensajeInvalidoException(String message) {

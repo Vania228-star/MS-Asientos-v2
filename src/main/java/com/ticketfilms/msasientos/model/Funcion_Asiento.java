@@ -31,7 +31,7 @@ public class Funcion_Asiento {
     @Column(name= "usuario_id")
     private String usuario_id;
 
-    // Correo de quien reservó: se usa solo para avisarle si la reserva vence
+    // Email del dueño de la reserva, para avisarle si la reserva vence
     @Column(name= "email_usuario")
     private String email_usuario;
 

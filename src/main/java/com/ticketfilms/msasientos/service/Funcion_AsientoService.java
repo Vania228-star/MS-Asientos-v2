@@ -4,7 +4,7 @@ import com.ticketfilms.msasientos.client.FuncionClient;
 import com.ticketfilms.msasientos.dto.FuncionResponse;
 import com.ticketfilms.msasientos.exception.CarteleraNoDisponibleException;
 import com.ticketfilms.msasientos.exception.FuncionNoEncontradaException;
-import com.ticketfilms.msasientos.kafka.AsientoKafkaProducer;
+import com.ticketfilms.msasientos.messaging.AsientoEventPublisher;
 import com.ticketfilms.msasientos.model.Asiento;
 import com.ticketfilms.msasientos.model.Funcion_Asiento;
 import com.ticketfilms.msasientos.model.Sala;
@@ -15,6 +15,7 @@ import feign.FeignException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -34,7 +35,7 @@ public class Funcion_AsientoService {
     private final AsientoRepository asientoRepository;
     private final SalaRepository salaRepository;
     private final FuncionClient funcionClient;
-    private final AsientoKafkaProducer asientoKafkaProducer;
+    private final AsientoEventPublisher asientoEventPublisher;
 
     // Solo responde si la reserva venció. No publica nada: avisar es otra responsabilidad.
     private boolean estaExpirado(Funcion_Asiento fa) {
@@ -59,6 +60,45 @@ public class Funcion_AsientoService {
         return ids.stream().distinct().sorted().toList();
     }
 
+    // Convierte ids de asiento en etiquetas legibles (ej. "F7") para el correo
+    private List<String> etiquetas(List<Long> asientosIds) {
+        List<String> etiquetas = asientoRepository.findAllById(asientosIds).stream()
+                .map(a -> a.getFila() + a.getNumero())
+                .toList();
+        if (etiquetas.isEmpty()) {
+            return asientosIds.stream().map(String::valueOf).toList();
+        }
+        return etiquetas;
+    }
+
+    /**
+     * Avisa a los DUEÑOS de las reservas vencidas (reserva.expirada).
+     * Se agrupa por dueño: cada uno recibe un solo evento con todos sus asientos.
+     * Debe llamarse ANTES de dejarDisponible(), porque eso borra usuario y email.
+     * No se avisa si el dueño es "omitirUsuarioId" (ej. quien está comprando ahora)
+     * ni si el dueño no tiene email guardado (ms-notificaciones lo rechazaría).
+     */
+    private void publicarExpiradas(List<Funcion_Asiento> expiradas, String omitirUsuarioId) {
+        if (expiradas == null || expiradas.isEmpty()) {
+            return;
+        }
+        Map<String, List<Funcion_Asiento>> porDueno = expiradas.stream()
+                .filter(fa -> fa.getUsuario_id() != null && !fa.getUsuario_id().isBlank())
+                .filter(fa -> !fa.getUsuario_id().equals(omitirUsuarioId))
+                .collect(Collectors.groupingBy(Funcion_Asiento::getUsuario_id));
+
+        porDueno.forEach((usuarioId, lista) -> {
+            String email = lista.get(0).getEmail_usuario();
+            if (email == null || email.isBlank()) {
+                return;
+            }
+            Long funcionId = lista.get(0).getFuncion_id();
+            List<Long> asientosIds = lista.stream().map(Funcion_Asiento::getAsiento_id).toList();
+            asientoEventPublisher.enviarReservaExpirada(
+                    funcionId, etiquetas(asientosIds), asientosIds, usuarioId, email);
+        });
+    }
+
     @Transactional
     public List<Funcion_Asiento> obtenerMapaFuncion_Asientos(Long funcion_id) {
         List<Funcion_Asiento> asientos = funcion_AsientoRepository.findByFuncion_id(funcion_id);
@@ -72,7 +112,8 @@ public class Funcion_AsientoService {
                 .collect(Collectors.toList());
 
         if (!expirados.isEmpty()) {
-            asientoKafkaProducer.publicarReservasExpiradas(expirados, null);
+            // Se avisa a cada dueño antes de borrarle los datos a la reserva
+            publicarExpiradas(expirados, null);
             expirados.forEach(this::dejarDisponible);
             funcion_AsientoRepository.saveAll(expirados);
         }
@@ -141,7 +182,7 @@ public class Funcion_AsientoService {
 
         LocalDateTime expiracion = LocalDateTime.now().plusMinutes(5);
         List<Funcion_Asiento> aReservar = new ArrayList<>();
-        List<Funcion_Asiento> vencidasDeOtros = new ArrayList<>();
+        List<Funcion_Asiento> vencidas = new ArrayList<>();
 
         for (Long asiento_id : ordenarSinRepetidos(asientosIds)) {
             Optional<Funcion_Asiento> optFuncionAsiento
@@ -160,13 +201,14 @@ public class Funcion_AsientoService {
             }
 
             if (expirado) {
-                vencidasDeOtros.add(funcion_Asiento);
+                vencidas.add(funcion_Asiento);
             }
             aReservar.add(funcion_Asiento);
         }
 
-        // Todo validado: ahora sí se avisa a los dueños anteriores (antes de pisar sus datos)
-        asientoKafkaProducer.publicarReservasExpiradas(vencidasDeOtros, usuario_id);
+        // Todo validado: se avisa a los dueños anteriores (antes de pisar sus datos).
+        // Si el dueño anterior es el mismo que reserva ahora, no se le avisa.
+        publicarExpiradas(vencidas, usuario_id);
 
         for (Funcion_Asiento funcion_Asiento : aReservar) {
             funcion_Asiento.setEstado(ESTADO_RESERVADO);
@@ -257,7 +299,7 @@ public class Funcion_AsientoService {
 
             if (estaExpirado(funcion_Asiento)) {
                 // Quien compra ya recibe el aviso de compra.fallida; solo se avisa si el dueño es otro
-                asientoKafkaProducer.publicarReservasExpiradas(List.of(funcion_Asiento), usuario_id);
+                publicarExpiradas(List.of(funcion_Asiento), usuario_id);
                 dejarDisponible(funcion_Asiento);
                 funcion_AsientoRepository.save(funcion_Asiento);
                 return "RESERVA_EXPIRADA";
@@ -319,7 +361,8 @@ public class Funcion_AsientoService {
             aLiberar.add(funcion_Asiento);
         }
 
-        asientoKafkaProducer.publicarReservasExpiradas(vencidasDeOtros, null);
+        // Si había reservas vencidas de otra persona, se le avisa a su dueño
+        publicarExpiradas(vencidasDeOtros, usuario_id);
 
         aLiberar.forEach(this::dejarDisponible);
         funcion_AsientoRepository.saveAll(aLiberar);
