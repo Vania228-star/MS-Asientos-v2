@@ -3,6 +3,7 @@ package com.ticketfilms.msasientos.service;
 import com.ticketfilms.msasientos.client.FuncionClient;
 import com.ticketfilms.msasientos.dto.FuncionResponse;
 import com.ticketfilms.msasientos.exception.FuncionNoEncontradaException;
+import com.ticketfilms.msasientos.kafka.AsientoKafkaProducer;
 import com.ticketfilms.msasientos.messaging.AsientoEventPublisher;
 import com.ticketfilms.msasientos.model.Asiento;
 import com.ticketfilms.msasientos.model.Funcion_Asiento;
@@ -25,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import com.ticketfilms.msasientos.kafka.AsientoKafkaProducer;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -40,6 +42,8 @@ class Funcion_AsientosServiceTest {
     private FuncionClient funcionClient;
     @Mock
     private AsientoEventPublisher asientoEventPublisher;   // <-- corrected type
+    @Mock
+    private AsientoKafkaProducer asientoKafkaProducer;
 
     @InjectMocks
     private Funcion_AsientoService funcionAsientoService;

@@ -51,6 +51,12 @@
             <artifactId>spring-boot-starter-amqp</artifactId>
         </dependency>
 
+        <!-- Kafka (Spring Kafka) -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+
         <!-- Base de datos MySQL -->
         <dependency>
             <groupId>com.mysql</groupId>

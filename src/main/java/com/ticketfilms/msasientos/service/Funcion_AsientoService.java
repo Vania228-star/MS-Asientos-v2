@@ -4,6 +4,7 @@ import com.ticketfilms.msasientos.client.FuncionClient;
 import com.ticketfilms.msasientos.dto.FuncionResponse;
 import com.ticketfilms.msasientos.exception.CarteleraNoDisponibleException;
 import com.ticketfilms.msasientos.exception.FuncionNoEncontradaException;
+import com.ticketfilms.msasientos.kafka.AsientoKafkaProducer;
 import com.ticketfilms.msasientos.messaging.AsientoEventPublisher;
 import com.ticketfilms.msasientos.model.Asiento;
 import com.ticketfilms.msasientos.model.Funcion_Asiento;
@@ -36,6 +37,7 @@ public class Funcion_AsientoService {
     private final SalaRepository salaRepository;
     private final FuncionClient funcionClient;
     private final AsientoEventPublisher asientoEventPublisher;
+    private final AsientoKafkaProducer asientoKafkaProducer;  
 
     // Solo responde si la reserva venció. No publica nada: avisar es otra responsabilidad.
     private boolean estaExpirado(Funcion_Asiento fa) {
@@ -94,8 +96,15 @@ public class Funcion_AsientoService {
             }
             Long funcionId = lista.get(0).getFuncion_id();
             List<Long> asientosIds = lista.stream().map(Funcion_Asiento::getAsiento_id).toList();
+            List<String> etiquetas = etiquetas(asientosIds);
+
+            // RabbitMQ: cola operativa con DLQ (flujo actual)
             asientoEventPublisher.enviarReservaExpirada(
-                    funcionId, etiquetas(asientosIds), asientosIds, usuarioId, email);
+                    funcionId, etiquetas, asientosIds, usuarioId, email);
+
+            // Kafka: mismo evento en el tópico reserva.expirada (log auditable, 3×3)
+            asientoKafkaProducer.enviarReservaExpirada(
+                    funcionId, etiquetas, asientosIds, usuarioId, email);
         });
     }
 
