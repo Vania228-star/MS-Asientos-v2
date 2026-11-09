@@ -1,10 +1,212 @@
-# Requiere el clúster RabbitMQ corriendo (lo levanta el compose de ms-boletos)
-# y la red compartida:  docker network create ticketfilms-net
+# ============================================================
+# Infraestructura de mensajería de ticketFilms (ms-asientos)
+#   - Kafka con Zookeeper: 3 brokers → tópicos con 3 particiones
+#     y 3 réplicas REALES + kafka-ui
+#   - RabbitMQ: clúster de 2 nodos (rabbit1 + rabbit2) con failover
+#
+# Uso:
+#   docker network create ticketfilms-net     # solo la 1ª vez
+#   docker compose up -d                      # levanta toda la infra
+#   docker compose ps                         # debe quedar todo healthy
+#   http://localhost:8090                     # kafka-ui
+#   http://localhost:15672                    # RabbitMQ (guest/guest)
+#
+# La app NO se levanta por defecto. Para correrla en contenedor:
+#   docker compose --profile app up -d --build
+# En VS Code / local (usa localhost:9092 y localhost:5672):
+#   .\mvnw spring-boot:run
+#
+# IMPORTANTE: este compose es la infra DEFINITIVA del equipo. No levantes
+# a la vez los composes de ms-boletos: crean rabbit1/rabbit2 y kafka con
+# los mismos puertos (5672, 15672, 9092, 8090) y chocan.
+# ============================================================
 services:
+
+  # ---------- Zookeeper (modo clásico de Kafka, lo pide la consigna) ----------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_HEAP_OPTS: "-Xmx256m -Xms256m"
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "cub zk-ready localhost:2181 10"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # ---------- Kafka: 3 brokers ----------
+  # Cada broker escucha en 2 interfaces:
+  #   EXTERNAL -> app en la máquina   (localhost:9092 / 9094 / 9095)
+  #   INTERNAL -> entre brokers y apps en contenedores (kafkaN:29092)
+  kafka1:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka1
+    hostname: kafka1
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+    environment: &kafka-env
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: EXTERNAL://0.0.0.0:9092,INTERNAL://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # Todo con 3 réplicas: si muere 1 broker, los tópicos siguen vivos
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
+      KAFKA_BROKER_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka1:29092
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  kafka2:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka2
+    hostname: kafka2
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9094:9092"
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9094,INTERNAL://kafka2:29092
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  kafka3:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka3
+    hostname: kafka3
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9095:9092"
+    environment:
+      <<: *kafka-env
+      KAFKA_BROKER_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9095,INTERNAL://kafka3:29092
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ---------- Crea los tópicos 3×3 una sola vez (idempotente) ----------
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka-init
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        echo "== Tópicos de negocio: 3 particiones x 3 réplicas, retención 7 días =="
+        for t in boleto.comprado compra.fallida reserva.expirada; do
+          kafka-topics --bootstrap-server kafka1:29092 --create --if-not-exists \
+            --topic "$$t" --partitions 3 --replication-factor 3 \
+            --config retention.ms=604800000
+        done
+        echo "== DLTs (fallas definitivas): 3x3, retención 3 días =="
+        for t in boleto.comprado.DLT compra.fallida.DLT reserva.expirada.DLT; do
+          kafka-topics --bootstrap-server kafka1:29092 --create --if-not-exists \
+            --topic "$$t" --partitions 3 --replication-factor 3 \
+            --config retention.ms=259200000
+        done
+        echo "== Tópicos creados =="
+        kafka-topics --bootstrap-server kafka1:29092 --list
+    restart: "no"
+
+  # ---------- Pantalla web para ver tópicos, particiones y mensajes ----------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      kafka1:
+        condition: service_healthy
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ticketfilms
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:29092
+
+  # ---------- RabbitMQ: clúster de 2 nodos (idéntico al de tu pareja) ----------
+  rabbit1:
+    image: rabbitmq:3.13-management
+    container_name: rabbit1
+    hostname: rabbit1
+    environment:
+      RABBITMQ_ERLANG_COOKIE: ticketfilms-cookie
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  rabbit2:
+    image: rabbitmq:3.13-management
+    container_name: rabbit2
+    hostname: rabbit2
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+    environment:
+      RABBITMQ_ERLANG_COOKIE: ticketfilms-cookie
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    # Arranca, se une al clúster de rabbit1 y vuelve a arrancar en primer plano
+    command: >
+      bash -c "rabbitmq-server -detached &&
+      sleep 12 &&
+      rabbitmqctl stop_app &&
+      rabbitmqctl reset &&
+      rabbitmqctl join_cluster rabbit@rabbit1 &&
+      rabbitmqctl stop &&
+      sleep 3 &&
+      exec rabbitmq-server"
+
+  # ---------- La app (solo con --profile app) ----------
   ms-asientos:
     profiles: ["app"]
     build: .
     container_name: ms-asientos-container
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     ports:
       - "8082:8082"
     environment:
@@ -12,11 +214,16 @@ services:
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
       COGNITO_ISSUER_URI: ${COGNITO_ISSUER_URI}
+      # Failover Rabbit: si cae rabbit1, usa rabbit2
       RABBITMQ_ADDRESSES: rabbit1:5672,rabbit2:5672
-      KAFKA_BOOTSTRAP_SERVERS: kafka1:29092,kafka2:29092,kafka3:29092
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      # Desde contenedor se usa el listener INTERNAL (kafkaN:29092);
+      # el EXTERNAL anuncia localhost y no funciona entre contenedores
+      KAFKA_BOOTSTRAP_SERVERS: kafka1:29092,kafka2:29092,kafka3:29092
       MS_CARTELERA_URL: http://host.docker.internal:8081
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: on-failure
 
 networks:
